@@ -14,6 +14,7 @@ class xpdAn:
         self._current_search = None
         self._current_table = None
         self.all_headers = self._all_headers()
+        self.md_summary_field = ['ex_name', 'sp_requested_exposure'] # default
         #FIXME - add hook to is_prun, is_setup filter
 
     @property
@@ -24,7 +25,6 @@ class xpdAn:
         """ update saf and pull out all headers belong to this saf 
         similar to property setter but want user to be specific
         """
-
         self._saf_num = saf_num
         self.all_headers = self._all_headers()
 
@@ -48,13 +48,23 @@ class xpdAn:
     @property
     def current_search(self):
         """ property that holds a list of header(s) from most recent search """
-        return self._current_search
+        df_summary = pd.DataFrame()
+        for header in self._current_search:
+            # get md
+            md = []
+            for field in self.md_summary_field:
+                md.append(header['descriptors'].get(field))
+            #make table
+            df_ext = pd.DataFrame(md)
+            df_summary = df_summary.append(df.ext.transpose())
+        print(df_summary)
+        #return self._current_search
 
-    def _set_current_search(self, headers, *, index=None):
+    def _set_current_search(self, headers=None, *, index=None):
         print("INFO: attribute of `current search` has been updated.")
         if index is None:
             self._current_search = headers
-        else:
+        elif headers is None:
             self._current_search = self._current_search[index]
 
     @property
@@ -92,7 +102,7 @@ class xpdAn:
 
     def get_index(self, group_ind=None):
         """ method to slicing current_search """
-        if index is None:
+        if group_ind is None:
             print("INFO: dude, you don't give me index. Nothing happen")
         self._set_current_search(index=group_ind)
 
