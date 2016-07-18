@@ -48,17 +48,17 @@ class xpdAn:
     @property
     def current_search(self):
         """ property that holds a list of header(s) from most recent search """
-        df_summary = pd.DataFrame()
-        for header in self._current_search:
-            # get md
-            md = []
-            for field in self.md_summary_field:
-                md.append(header['descriptors'].get(field))
-            #make table
-            df_ext = pd.DataFrame(md)
-            df_summary = df_summary.append(df.ext.transpose())
-        print(df_summary)
-        #return self._current_search
+        #df_summary = pd.DataFrame()
+        #for header in self._current_search:
+        #    # get md
+        #    md = []
+        #    for field in self.md_summary_field:
+        #        md.append(header['descriptors'].get(field))
+        #    #make table
+        #    df_ext = pd.DataFrame(md)
+        #    df_summary = df_summary.append(df.ext.transpose())
+        #print(df_summary)
+        return self._current_search
 
     def _set_current_search(self, headers=None, *, index=None):
         print("INFO: attribute of `current search` has been updated.")
