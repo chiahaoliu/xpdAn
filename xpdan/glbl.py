@@ -47,7 +47,8 @@ def make_glbl(env_code=0):
         BASE_DIR = os.getcwd()
     else:
         # beamline
-        BASE_DIR = os.path.expanduser('~/')
+        #BASE_DIR = os.path.expanduser('~/')
+        BASE_DIR = os.path.abspath('/direct/XF28ID1/pe1_data/UserArea/XPDhome/')
 
     # top directories
     HOME_DIR = os.path.join(BASE_DIR, HOME_DIR_NAME)
@@ -89,8 +90,9 @@ def make_glbl(env_code=0):
         ANALYSIS_DIR
     ]
 
-    for folder in ALL_FOLDERS:
-        os.makedirs(folder, exist_ok=True)
+    if int(env_code) == 1:
+        for folder in ALL_FOLDERS:
+            os.makedirs(folder, exist_ok=True)
 
     # directories that won't be tar in the end of beamtime
     _EXCLUDE_DIR = [HOME_DIR, BLCONFIG_DIR, YAML_DIR]

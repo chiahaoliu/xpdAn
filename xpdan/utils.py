@@ -3,9 +3,10 @@ import datetime
 import numpy as np
 from mock import MagicMock
 
-from bluesky import RunEngine
-from bluesky.examples import Reader, motor
-from bluesky.plans import scan, count, relative_scan
+# HOTFIX at beamline
+#from bluesky import RunEngine
+#from bluesky.examples import Reader, motor
+#from bluesky.plans import scan, count, relative_scan
 
 from .glbl import an_glbl
 
@@ -21,10 +22,9 @@ def _timestampstr(timestamp):
     return timestring
 
 
+"""
 # area det for simulation
 class SimulatedPE1C(Reader):
-    """Subclass the bluesky plain detector examples ('Reader')
-     add attributes."""
 
     def __init__(self, name, read_fields):
         self.images_per_set = MagicMock()
@@ -53,8 +53,6 @@ class SimulatedPE1C(Reader):
 
 
 def _generate_simulation_data():
-    """ priviate function to insert data to exp_db
-    """
     if os.environ['XPDAN_SETUP'] != str(2):
         raise RuntimeError("ONLY insert data if you are running"
                            "simulation")
@@ -67,3 +65,5 @@ def _generate_simulation_data():
     RE(count([pe1c]))
     RE(scan([pe1c], motor, 1, 5, 5))
     RE(scan([pe1c], motor, 1, 10, 10))
+
+"""
