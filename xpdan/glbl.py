@@ -4,10 +4,10 @@ import tempfile
 from time import strftime
 
 import matplotlib
-from databroker import db
+#from databroker import db
 
 matplotlib.use('qt4agg')
-
+from xpdan.simulation import build_pymongo_backed_broker
 
 def make_glbl(env_code=0):
     """ make a instance of Glbl class
@@ -42,9 +42,11 @@ def make_glbl(env_code=0):
     if int(env_code) == 1:
         BASE_DIR = tempfile.mkdtemp()
         print('creating {}'.format(BASE_DIR))
+        db = build_pymongo_backed_broker()
     # simulation
     elif int(env_code) == 2:
         BASE_DIR = os.getcwd()
+        db = build_pymongo_backed_broker()
     else:
         # beamline
         #BASE_DIR = os.path.expanduser('~/')
@@ -122,7 +124,7 @@ def make_glbl(env_code=0):
         det_image_field = DET_IMAGE_FIELD
         dark_field_key = DARK_FIELD_KEY
         calib_config_name = CALIB_CONFIG_NAME
-        exp_db = db
+        exp_db = None
         # default masking dict
         mask_dict = {'edge': 30, 'lower_thresh': 0.0,
                      'upper_thresh': None, 'bs_width': 13,

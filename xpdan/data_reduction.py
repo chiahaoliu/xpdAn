@@ -89,6 +89,7 @@ class DataReduction:
 
     def pull_dark(self, header):
         dark_uid = header.start.get(an_glbl.dark_field_key, None)
+        #print('here is the dark_uid{}'.format(dark_uid))
         if dark_uid is None:
             print("INFO: no dark frame is associated in this header, "
                   "subrraction will not be processed")
@@ -103,9 +104,12 @@ class DataReduction:
 
     def _dark_sub(self, event, dark_img):
         """ priviate method operates on event level """
+        # print('EVENT!!!! = {}'.format(event))
+        #print('I am in dark_sub')
         dark_sub_bool = False
         img = event['data'][self.image_field]
-        if dark_img is not None and isinstance(dark_img, np.ndarray):
+        #print('here is your dark image {}'.format(dark_img))
+        if dark_img is not None:#  and isinstance(dark_img, np.ndarray):
             dark_sub_bool = True
             img -= dark_img
         ind = event['seq_num']
@@ -152,10 +156,17 @@ def _prepare_header_list(headers):
     return header_list
 
 
-def _load_config():
-    with open(
-            os.path.join(an_glbl.config_base, an_glbl.calib_config_name)) as f:
-        config_dict = yaml.load(f)
+def _load_config(header):
+    try:
+        with open(
+                os.path.join(an_glbl.config_base, an_glbl.calib_config_name)) as f:
+            config_dict = yaml.load(f)
+    except FileNotFoundError:
+        config_dict = header.start.get('calibration_md', None)
+        if config_dict is None:
+            # back support
+            config_dict = header.start.get('sc_calibration_md', None)
+
     return config_dict
 
 
@@ -174,7 +185,7 @@ def _npt_cal(config_dict, total_shape=(2048, 2048)):
 
 def integrate_and_save(headers, dark_sub_bool=True,
                        polarization_factor=0.99,
-                       auto_mask=True, mask_dict=None,
+                       mask='default', mask_dict=None,
                        save_image=True, root_dir=None,
                        config_dict=None, handler=xpd_data_proc,
                        sum_idx_list=None,
@@ -188,14 +199,18 @@ def integrate_and_save(headers, dark_sub_bool=True,
     dark_sub_bool : bool, optional
         option to turn on/off dark subtraction functionality
     polarization_factor : float, optional
-        polarization correction factor, ranged from -1(vertical) to 
-        +1 (horizontal). default is 0.99. set to None for no
+        polarization correction factor, ranged from -1(vertical) to +1
+        (horizontal). default is 0.99. set to None for no
         correction.
-    auto_mask : bool, optional
-        turn on/off of automask functionality. default is True
+    mask : str, optional
+        string for mask option. Valid options are 'default', 'auto' and
+        'None'. If 'default', mask included in metadata will be
+        used. If 'auto', a new mask would be generated from current
+        image. If 'None', no mask would be applied. predefined option is
+        'default'.
     mask_dict : dict, optional
-        dictionary stores options for automasking functionality. 
-        default is defined by an_glbl.auto_mask_dict. 
+        dictionary stores options for automasking functionality.
+        default is defined by an_glbl.auto_mask_dict.
         Please refer to documentation for more details
     save_image : bool, optional
         option to save dark subtracted images. images will be 
@@ -235,14 +250,6 @@ def integrate_and_save(headers, dark_sub_bool=True,
     # normalize list
     header_list = _prepare_header_list(headers)
 
-    # config_dict
-    if config_dict is None:
-        config_dict = _load_config()  # default dict
-
-    # setting up geometry
-    ai.setPyFAI(**config_dict)
-    npt = _npt_cal(config_dict)
-
     total_rv_list_Q = []
     total_rv_list_2theta = []
 
@@ -254,6 +261,20 @@ def integrate_and_save(headers, dark_sub_bool=True,
             os.makedirs(root_dir, exist_ok=True)
         else:
             root_dir = W_DIR
+
+        # config_dict
+        if config_dict is None:
+            config_dict = _load_config(header)  # default dict
+            if config_dict is None: # still None
+                print("INFO: can't find calibration parameter under "
+                      "xpdUser/config_base/ or header metadata\n"
+                      "data reduction can not be perfomed.")
+                return
+
+        # setting up geometry
+        ai.setPyFAI(**config_dict)
+        npt = _npt_cal(config_dict)
+
         header_rv_list_Q = []
         header_rv_list_2theta = []
 
@@ -271,21 +292,32 @@ def integrate_and_save(headers, dark_sub_bool=True,
             if sum_idx_list:
                 f_name = 'sum_' + rest[-1] + f_name
 
+            # copy tiff_name here
+            tiff_fn = f_name
+
             # masking logic
+            # workflow for xpdAcq v0.5.1 release, will change later
             mask = np.ones(img.shape).astype(bool)
-            if auto_mask:
-                print("INFO: mask your image: {}".format(f_name))
-                f_name = 'masked_' + f_name
-                if mask_dict is None:
-                    mask_dict = an_glbl.mask_dict
-                dummy_img = np.copy(img)  # prepare for masking
-                dummy_img /= ai.polarization(dummy_img.shape,
-                                             polarization_factor)
-                mask = mask_img(dummy_img, ai, **mask_dict)
+            if mask=='default':
+                mask_md = header.start.get('mask', None)
+                if mask_md is None:
+                    print("INFO: no mask associated or mask information was"
+                          " not set up correctly, no mask will be applied")
+                # unpack here 
+                data, ind, indptr = mask_md
+                print("INFO: pull off mask associate with your image: {}"
+                      .format(f_name))
+                mask = decompress_mask(data, ind, indtpr, img.shape)
+            elif mask=='auto':
+                mask = mask_img(img, ai, **glbl.mask_dict)
+            elif mask=='None':
+                mask = None
+            mask_fn = os.path.splitext(f_name)[0]  # remove ext
+            if mask is not None:
                 print("INFO: mask file '{}' is saved at {}"
-                      .format(f_name, root_dir))
-                np.save(os.path.join(root_dir, f_name),
-                        mask)
+                      .format(mask_fn, root_dir))
+                np.save(os.path.join(root_dir, mask_fn),
+                        mask)  # default is .npy from np.save
 
             # integration logic
             stem, ext = os.path.splitext(f_name)
@@ -299,21 +331,31 @@ def integrate_and_save(headers, dark_sub_bool=True,
                                    [chi_fn_Q, chi_fn_2th],
                                    [header_rv_list_Q, header_rv_list_2theta]):
                 print("INFO: save chi file: {}".format(fn))
-                rv = ai.integrate1d(img, npt, filename=fn, mask=~mask,
+                if mask is not None:
+                    # make a copy, don't overwrite it
+                    _mask = ~mask
+
+                rv = ai.integrate1d(img, npt, filename=fn, mask=_mask,
                                     polarization_factor=polarization_factor,
                                     unit=unit, **kwargs)
                 l.append(rv)
 
             # save image logic
-            w_name = os.path.join(root_dir, f_name)
+            w_name = os.path.join(root_dir, tiff_fn)
             if save_image:
                 tif.imsave(w_name, img)
                 if os.path.isfile(w_name):
                     print('image "%s" has been saved at "%s"' %
-                          (f_name, root_dir))
+                          (tiff_fn, root_dir))
                 else:
                     print('Sorry, something went wrong with your tif saving')
                     return
+
+        # save run_start
+        stem, ext = os.path.splitext(w_name)
+        config_name = w_name.replace(ext, '.yml')
+        with open(config_name, 'w') as f:
+            yaml.dump(header.start, f)  # save all md in start
 
         # each header generate  a list of rv
         total_rv_list_Q.append(header_rv_list_Q)
@@ -324,7 +366,7 @@ def integrate_and_save(headers, dark_sub_bool=True,
 
 
 def integrate_and_save_last(dark_sub_bool=True, polarization_factor=0.99,
-                            auto_mask=True, mask_dict=None,
+                            mask='default', mask_dict=None,
                             save_image=True, root_dir=None,
                             config_dict=None, handler=xpd_data_proc,
                             sum_idx_list=None,
@@ -339,8 +381,12 @@ def integrate_and_save_last(dark_sub_bool=True, polarization_factor=0.99,
         polarization correction factor, ranged from -1(vertical) to 
         +1 (horizontal). default is 0.99. set to None for no
         correction.
-    auto_mask : bool, optional
-        turn on/off of automask functionality. default is True
+    mask : str, optional
+        string for mask option. Valid options are 'default', 'auto' and
+        'None'. If 'default', mask included in metadata will be
+        used. If 'auto', a new mask would be generated from current
+        image. If 'None', no mask would be applied. predefined option is
+        'default'.
     mask_dict : dict, optional
         dictionary stores options for automasking functionality. 
         default is defined by an_glbl.auto_mask_dict. 
@@ -382,14 +428,14 @@ def integrate_and_save_last(dark_sub_bool=True, polarization_factor=0.99,
     """
     integrate_and_save(handler.exp_db[-1], dark_sub_bool=dark_sub_bool,
                        polarization_factor=polarization_factor,
-                       auto_mask=auto_mask, mask_dict=mask_dict,
+                       mask=mask, mask_dict=mask_dict,
                        save_image=save_image,
                        root_dir=root_dir,
                        config_dict=config_dict,
                        handler=handler, sum_idx_list=sum_idx_list, **kwargs)
 
 
-def save_tiff(headers, dark_sub_bool=True, max_count=None, dryrun=False,
+def save_tiff(headers, dark_sub=True, max_count=None, dryrun=False,
               handler=xpd_data_proc):
     """ save images obtained from dataBroker as tiff format files.
 
@@ -430,12 +476,14 @@ def save_tiff(headers, dark_sub_bool=True, max_count=None, dryrun=False,
             root_dir = W_DIR
         # dark logic
         dark_img = None
-        if dark_sub_bool:
+        if dark_sub:
+            #print("!!!PULL DARK!!!")
             dark_img, dark_time = handler.pull_dark(header)
         # event
-        for event in handler.exp_db.get_events(header, fill=True):
+        for event in list(handler.exp_db.get_events(header, fill=True)):
             img, event_timestamp, ind, dark_sub_bool = handler._dark_sub(
                 event, dark_img)
+            #print('dark_sub_bool = {}'.format(dark_sub_bool))
             f_name = handler._file_name(event, event_timestamp, ind)
             if dark_sub_bool:
                 f_name = 'sub_' + f_name
@@ -459,7 +507,7 @@ def save_tiff(headers, dark_sub_bool=True, max_count=None, dryrun=False,
 
         # save run_start
         stem, ext = os.path.splitext(w_name)
-        config_name = w_name.replace(ext, '.yaml')
+        config_name = w_name.replace(ext, '.yml')
         with open(config_name, 'w') as f:
             yaml.dump(header.start, f)  # save all md in start
 

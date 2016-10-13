@@ -8,13 +8,14 @@ app = QtGui.QApplication(sys.argv)
 # 0 -> beamline
 # 1 -> test
 # 2 -> simulation
-os.environ['XPDAN_SETUP'] = str(2)
+os.environ['XPDAN_SETUP'] = str(0)
 
 # setup glbl
 from xpdan.glbl import an_glbl
+an_glbl.exp_db = db
 
 # import functionality
 from xpdan.qt_gui import XpdanSearch, an
 from xpdan.data_reduction import *
 
-db = an_glbl.exp_db # alias
+#db = an_glbl.exp_db # alias
