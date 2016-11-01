@@ -111,3 +111,8 @@ class XpdSubtractedTiffExporter(LiveTiffExporter):
                 # if user wants wants raw dark as well
                 if self.save_dark:
                     self._save_image(dark_img, 'dark_'+filename)
+
+    def stop(self, doc):
+        # FIXME: room for summing logic
+        pass
+
