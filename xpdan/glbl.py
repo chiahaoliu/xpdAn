@@ -20,8 +20,6 @@ from time import strftime
 import matplotlib
 from xpdan.simulation import build_pymongo_backed_broker
 
-# from databroker import db
-
 matplotlib.use('qt4agg')
 
 
@@ -66,6 +64,7 @@ def make_glbl(env_code=0):
     else:
         # beamline
         BASE_DIR = os.path.expanduser('~/')
+        from databroker import db
 
     # top directories
     HOME_DIR = os.path.join(BASE_DIR, HOME_DIR_NAME)
