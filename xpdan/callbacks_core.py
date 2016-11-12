@@ -4,10 +4,10 @@ import os
 import datetime
 import numpy as np
 from bluesky.callbacks.core import CallbackBase
+import doct
 
 # supplementary functions
 def _timestampstr(timestamp):
-
     """convert timestamp to strftime formate"""
     timestring = datetime.datetime.fromtimestamp(float(timestamp)).strftime(
         '%Y%m%d-%H%M%S')
@@ -87,7 +87,6 @@ class XpdAcqLiveTiffExporter(CallbackBase):
 
         It operates at event level, i.e., doc is event document
         """
-
         # convert time
         timestr = _timestampstr(doc['time'])
         # readback value for certain list of data keys
@@ -119,7 +118,7 @@ class XpdAcqLiveTiffExporter(CallbackBase):
 
     def _save_image(self, image, filename):
         """method to save image"""
-        dir_path, fn_tail = os.path.split(filename)
+        dir_path, fn = os.path.split(filename)
         os.makedirs(dir_path, exist_ok=True)
 
         if not self.overwrite:
@@ -129,7 +128,7 @@ class XpdAcqLiveTiffExporter(CallbackBase):
         if not self.dryrun:
             self._tifffile.imsave(filename, np.asarray(image))
             print("INFO: {} has been saved at {}"
-                  .format(fn_head, fn_tail))
+                  .format(dir_path, fn))
 
         self.filenames.append(filename)
 
@@ -157,12 +156,12 @@ class XpdAcqLiveTiffExporter(CallbackBase):
         self._start = doct.Document('start', doc)
 
         # find dark scan uid
-        dark_uid = _pull_dark_uid(doc)
+        dark_uid = self._pull_dark_uid(doc)
         if dark_uid is None:
             self.dark_img = None
             self._find_dark = False
         else:
-            dark_header = db[dark_uid]
+            dark_header = self.db[dark_uid]
             self.dark_img = np.asarray(self.db.get_images(dark_header,
                                                           self.image_field)
                                       ).squeeze()
@@ -190,7 +189,7 @@ class XpdAcqLiveTiffExporter(CallbackBase):
                 self._save_image(image, os.path.join(path_dir,
                                                      'sub_'+fn))
             else:
-                self._save_image(plane,filename)
+                self._save_image(image, filename)
             # if user wants wants raw dark
             if self.save_dark:
                 self._save_image(self.dark_img, os.path.join(path_dir,

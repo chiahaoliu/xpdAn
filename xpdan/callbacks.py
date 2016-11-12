@@ -1,4 +1,5 @@
 """This module is for instantiation of Callbacks"""
+from .callbacks_core import XpdAcqLiveTiffExporter
 
 # xpdAcq standard instantiation
 template = '/direct/XF28ID1/pe2_data/xpdUser/tiff_base/{start.sample_name}'
