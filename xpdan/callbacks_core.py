@@ -67,7 +67,7 @@ class XpdAcqLiveTiffExporter(CallbackBase):
 
         if db is None:
             # Read-only db
-            from databroker import DataBroker as db
+            from databroker.databroker import DataBroker as db
 
         self.db = db
 
@@ -214,9 +214,3 @@ class XpdAcqLiveTiffExporter(CallbackBase):
         self.filenames = []
         super().stop(doc)
 
-
-# xpdAcq standard instantiation
-template = '/direct/XF28ID1/pe2_data/xpdUser/tiff_base/{start.sample_name}'
-data_fields = ['temperature', 'diff_x', 'diff_y', 'eurotherm'] # known devices
-xpdacq_tiff_export = XpdAcqLiveTiffExporter('pe1_image', template,
-                                            data_fields, overwrite=True)
