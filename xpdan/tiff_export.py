@@ -25,24 +25,15 @@ class XpdAcqLiveTiffExporter(CallbackBase):
     ----------
     field : str
         a data key, e.g., 'image'
-    root_dir : str
-        top directory where tiff files will be saved
-    template : str
-        A templated for metadata that will be included in the file name.
+    data_dir_template : str
+        A templated for directory where images will be saved to.
         It is expressed with curly brackets, which will be filled in with
         the attributes of 'start', 'event', and (for image stacks) 'i',
         a sequential number.
-        e.g., "scan{start.scan_id}_by_{start.experimenter}_{i}.tiff"
+        e.g., "/xpdUser/tiff_base/{start.sample_name}/"
     data_fields : list, optional
         a list of strings for data fields want to be included. default
-        is an empty list (not include any).
-    base_template : str, optional
-        template for base directory, default to None.
-        It is expressed with curly brackets, which will be filled
-        in with the attributes of 'start','event', (for image
-        stacks) 'i', a sequential number. Files will be saved
-        under root_dir/base_dir/. Example for base_dir_template
-        could be "{start.sample_name}"
+        is an empty list (not include any readback metadata in filename).
     save_dark : bool, optionl
         option to save dark frames, if True, subtracted images and dark
         images would be saved. default is False.
@@ -59,9 +50,9 @@ class XpdAcqLiveTiffExporter(CallbackBase):
     filenames : list of filenames written in ongoing or most recent run
     """
 
-    def __init__(self, field, root_dir, template, data_fields=[],
-                 base_dir=None, save_dark=False, dryrun=False,
-                 overwrite=False, db=None):
+    def __init__(self, field, data_dir_template,
+                 data_fields=[], save_dark=False,
+                 dryrun=False, overwrite=False, db=None):
         try:
             import tifffile
         except ImportError:
@@ -82,23 +73,22 @@ class XpdAcqLiveTiffExporter(CallbackBase):
 
         # required args
         self.field = field
-        self.root_dir = root_dir
-        self.template = template
+        self.template = data_dir_template
         # optioanal args 
         self.data_fields = data_fields  # list of keys for md to include
-        self.base_template = base_template  # additional sub-folder
         self.save_dark = save_dark  # option of save dark 
         self.dryrun = dryrun
         self.overwrite = overwrite
         self.filenames = []
         self._start = None
 
-    def _generate_filename(self, doc, is_imgstack):
-        """ method to generate filename based on template
+    def _generate_filename(self, doc, stack_ind=None):
+        """method to generate filename based on template
 
-        It operates at event level
+        It operates at event level, i.e., doc is event document
         """
 
+        # convert time
         timestr = _timestampstr(doc['time'])
         # readback value for certain list of data keys
         data_val_list = []
@@ -107,27 +97,30 @@ class XpdAcqLiveTiffExporter(CallbackBase):
             if val is not None:
                 data_val_list.append(val)
         data_val_trunk = '_'.join(data_val_list)
-        # event sequence
-        if is_imgstack:
-            base_dir = self.base_template.format(start=self._start, event=doc)
-            event_info = self.template.format(i=i, start=self._start,
-                                              event=doc)
-        else:
-            base_dir = self.base_template.format(start=self._start, event=doc)
-            event_info = self.template.format(start=self._start, event=doc)
 
-        # total name
+        # event sequence
+        base_dir = self.data_dir_template.format(start=self._start,
+                                                     event=doc)
+        if stack_ind is not None:
+            # standard, do need to expose it to user
+            event_template = '{event.seq_num:03d}_{i}.tif'
+            event_info = event_template.format(i=stack_ind, start=self._start,
+                                               event=doc)
+        else:
+            # standard, do need to expose it to user
+            event_template = '{event.seq_num:03d}.tif'
+            event_info = event_template.format(start=self._start, event=doc)
+
+        # full path + complete filename
         filename = '_'.join(timestr, data_val_trunk, event_info)
-        total_filename = os.path.join(self.root_dir,
-                                      base_dir,
-                                      filename)
+        total_filename = os.path.join(base_dir, filename)
+
         return total_filename
 
     def _save_image(self, image, filename):
-        """ method to save image """
-        fn_head, fn_tail = os.path.splitext(filename)
-        if not os.path.isdir(fn_head):
-            os.makedirs(fn_head, exist_ok=True)
+        """method to save image"""
+        dir_path, fn_tail = os.path.split(filename)
+        os.makedirs(dir_path, exist_ok=True)
 
         if not self.overwrite:
             if os.path.isfile(filename):
@@ -140,6 +133,22 @@ class XpdAcqLiveTiffExporter(CallbackBase):
 
         self.filenames.append(filename)
 
+    def _pull_dark_uid(self, doc, dark_field_key='sc_dk_field_uid'):
+        """method to relate dark to images
+
+        Simply replace this method if scheme is changed in the future
+        """
+        if 'dark_frame' in doc:
+            # found a dark header
+            dark_uid = None  # dark header, pass
+        else:
+            dark_uid = doc.get(dark_field_key, None)
+            if dark_uid is None:
+                print("INFO: no dark frame is associated in this header, "
+                      "subtraction will not be processed")
+                dark_uid = None  # can't find a dark
+        return dark_uid
+
     def start(self, doc):
         self.filenames = []
         # Convert doc from dict into dottable dict, more convenient
@@ -147,22 +156,15 @@ class XpdAcqLiveTiffExporter(CallbackBase):
         self._start = doct.Document('start', doc)
 
         # find dark scan uid
-        # TODO - make dark_md key flexible in the future
-        if 'dark_frame' in doc:
-            # found a dark header
-            self.dark_uid = None
-            self._is_dark = True
-        elif 'dark_frame' in doc:
-            if 'sc_dk_field_uid' in doc:
-                self.dark_uid = doc['sc_dk_field_uid']
-            else:
-                print("INFO: No dark_frame was associated in this scan."
-                      "no subtraction will be performed")
-                self.dark_uid = None
-            self._is_dark = False
+        dark_uid = _pull_dark_uid(doc)
+        if dark_uid is None:
+            self.dark_img = None
+            self._find_dark = False
         else:
-            # left extra slot here for edgy case
-            pass
+            self.dark_img = np.asarray(self.db.get_images(dark_header,
+                                                          self.image_field)
+                                      ).squeeze()
+            self._find_dark = True
         super().start(doc)
 
     def event(self, doc):
@@ -174,32 +176,38 @@ class XpdAcqLiveTiffExporter(CallbackBase):
         self.db.fill_event(doc)  # modifies in place
         image = np.asarray(doc['data'][self.field])
 
-        # pull out dark image
-        # note: intentionally leave it at event level, as we might have
-        # dark frame per event
-        if self.dark_uid is not None:
-            # find dark image
-            dark_header = self.db[self.dark_uid]
-            dark_img = self.db.get_images(dark_header,
-                                          self.field).squeeze()
-        else:
-            # no dark_uid -> make a dummy dark
-            dark_img = np.zeros_like(image)
-        image = (image - dark_img)
+        if self.dark_img is None:
+            # make a dummy one
+            self.dark_img = np.zeros_like(image)
+
         if image.ndim == 2:
-            filename = self._generate_filename(doc, False)
-            self._save_image(image, filename)
+            image = np.subtract(image, self.dark_img)
+            filename = self._generate_filename(doc)
+            path_dir, fn = os.path.split(filename)
+            if self._find_dark:
+                self._save_image(image, os.path.join(path_dir,
+                                                     'sub_'+fn))
+            else:
+                self._save_image(plane,filename)
             # if user wants wants raw dark
             if self.save_dark:
-                self._save_image(dark_img, 'dark_'+filename)
+                self._save_image(self.dark_img, os.path.join(path_dir,
+                                                             'dark_'+fn))
         if image.ndim == 3:
+            # multiple images in one event
             for i, plane in enumerate(image):
-                filename = self._generate_filename(doc, True)
-                self._save_image(plane, filename)
+                image = np.subtract(plane, self.dark_img)
+                filename = self._generate_filename(doc, i)
+                path_dir, fn = os.path.split(filename)
+                if self._find_dark:
+                    self._save_image(plane, os.path.join(path_dir,
+                                                         'sub_'+fn))
+                else:
+                    self._save_image(plane, filename)
                 # if user wants wants raw dark
                 if self.save_dark:
-                    self._save_image(dark_img, 'dark_'+filename)
-
+                    self._save_image(self.dark_img, os.path.join(path_dir,
+                                                                 'dark_'+fn))
     def stop(self, doc):
         # TODO: include sum logic in the future
         self._start = None
@@ -208,10 +216,7 @@ class XpdAcqLiveTiffExporter(CallbackBase):
 
 
 # xpdAcq standard instantiation
-root_dir = '/direct/XF28ID1/pe2_data/xpdUser/tiff_base/'
-template = '{event.seq_num:03d}'
-data_fields = ['temperature', 'diff_x', 'diff_y']
-base_template = '{start.sample_name}'
-xpdacq_tiff_export = XpdAcqLiveTiffExporter('pe1_image', root_dir,
-                                            template, data_fields,
-                                            base_template)
+template = '/direct/XF28ID1/pe2_data/xpdUser/tiff_base/{start.sample_name}'
+data_fields = ['temperature', 'diff_x', 'diff_y', 'eurotherm'] # known devices
+xpdacq_tiff_export = XpdAcqLiveTiffExporter('pe1_image', template,
+                                            data_fields, overwrite=True)
