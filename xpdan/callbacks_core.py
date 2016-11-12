@@ -73,7 +73,7 @@ class XpdAcqLiveTiffExporter(CallbackBase):
 
         # required args
         self.field = field
-        self.template = data_dir_template
+        self.data_dir_template = data_dir_template
         # optioanal args 
         self.data_fields = data_fields  # list of keys for md to include
         self.save_dark = save_dark  # option of save dark 
@@ -128,7 +128,7 @@ class XpdAcqLiveTiffExporter(CallbackBase):
         if not self.dryrun:
             self._tifffile.imsave(filename, np.asarray(image))
             print("INFO: {} has been saved at {}"
-                  .format(dir_path, fn))
+                  .format(fn, dir_path))
 
         self.filenames.append(filename)
 
