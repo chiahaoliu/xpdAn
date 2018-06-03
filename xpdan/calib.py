@@ -17,8 +17,14 @@ import os
 import time
 
 import yaml
+
+# FIXME: It seems pyFAI upstream master has started deprecating
+# calibartion. Need solution for pyFAI 0.16.0
+import pyFAI
 from pyFAI.calibration import Calibration, PeakPicker, Calibrant
 from pyFAI.gui.utils import update_fig
+from pyFAI.calibrant import get_calibrant
+from pyFAI.azimuthalIntegrator import AzimuthalIntegrator
 
 from xpdan.dev_utils import _timestampstr
 from tempfile import TemporaryDirectory
@@ -37,6 +43,7 @@ def _save_calib_param(calib_c, timestr, calib_yml_fp):
         filepath to the yml file which stores calibration param
     """
     # save glbl attribute for xpdAcq
+    timestr = _timestampstr(time.time())
     calibrant_name = calib_c.calibrant.__repr__().split(' ')[0]
     calib_config_dict = {}
     calib_config_dict = calib_c.geoRef.getPyFAI()
@@ -58,68 +65,12 @@ def _save_calib_param(calib_c, timestr, calib_yml_fp):
           "perform this process again\n")
     print("INFO: you can also use:\n>>> show_calib()\ncommand to check"
           " current calibration parameters")
-    # print("INFO: To save your calibration image as a tiff file run\n"
-    #      "save_last_tiff()\nnow.")
     return calib_config_dict
 
 
-def _calibration(img, calibration, calib_ref_fp=None, **kwargs):
-    """engine for performing calibration on a image with geometry
-    correction software. current backend is ``pyFAI``.
-
-    Parameters
-    ----------
-    img : ndarray
-        image will be used for calibration process.
-    calibration : pyFAI.calibration.Calibration instance
-        Calibration instance with wavelength, calibrant and
-        detector configured.
-    calib_ref_fp : str
-        full file path to where the native pyFAI calibration information
-        will be saved.
-    kwargs:
-        additional keyword argument for calibration. please refer to
-        pyFAI documentation for all options.
-    """
-    print('{:=^20}'.format("INFO: you are able to perform calibration, "
-                           "please refer to pictorial guide here:\n"))
-    print('{:^20}'
-          .format("http://xpdacq.github.io/usb_Running.html#calib-manual\n"))
-    # default params
-    interactive = True
-    # calibration
-    c = calibration  # shorthand notation
-    timestr = _timestampstr(time.time())
-    c.gui = interactive
-    # annoying pyFAI logic, you need valid fn to start calibration
-    _is_tmp_dir = False
-    if calib_ref_fp is None:
-        _is_tmp_dir = True
-        td = TemporaryDirectory()
-        calib_ref_fp = os.path.join(td.name, 'from_calib_func')
-    basename, ext = os.path.splitext(calib_ref_fp)
-    poni_fn = basename + ".npt"
-    c.basename = basename
-    c.pointfile = poni_fn
-    c.peakPicker = PeakPicker(img, reconst=True,
-                              pointfile=c.pointfile,
-                              calibrant=c.calibrant,
-                              wavelength=c.wavelength,
-                              **kwargs)
-    c.peakPicker.gui(log=True, maximize=True, pick=True)
-    update_fig(c.peakPicker.fig)
-    c.gui_peakPicker()
-    # TODO: open issue at pyFAI on this crazyness
-    c.ai.setPyFAI(**c.geoRef.getPyFAI())
-    c.ai.wavelength = c.geoRef.wavelength
-    if _is_tmp_dir:
-        td.cleanup()
-
-    return c, timestr
-
-
-def img_calibration(img, wavelength, calibrant=None,
-                    detector=None, calib_ref_fp=None, **kwargs):
+def img_calibration(img, wavelength, calibrant=None, detector=None,
+                    interactive=True, calib_ref_fp=None,
+                    calib_kwargs=None):
     """function to calibrate experimental geometry wrt an image
 
     Parameters
@@ -143,10 +94,10 @@ def img_calibration(img, wavelength, calibrant=None,
         other allowed values are in pyFAI documentation.
     calib_ref_fp : str, optional
         full file path to where the native pyFAI calibration information
-        will be saved. Default to current working directory.
-    kwargs:
-        Additional keyword argument for calibration. please refer to
-        pyFAI documentation for all options.
+        will be saved. Default to ``/tmp`` directory.
+    calib_kwargs:
+        Additional keyword argument for pyFAI.calibration.PeakPicker.
+        Please refer to pyFAI documentation for full options.
 
     Returns
     -------
@@ -178,20 +129,56 @@ def img_calibration(img, wavelength, calibrant=None,
     pyFAI documentation:
     http://pyfai.readthedocs.io/en/latest/
     """
+    # default args : initial value for pyFAI calibration. It doesn't affect
+    # calibration results.
+    dist = 0.1  #mm
+
+
+    # vendoring pyFAI ``calib`` function
     wavelength *= 10**-10
     if detector is None:
-        detector = 'perkin_elmer'
+        detector = pyFAI.detectors.Perkin() 
     if calibrant is None:
-        calibrant = 'Ni'
+        calibrant = get_calibrant('Ni')
     elif isinstance(calibrant, list):
-        calibrant = Calibrant(dSpacing=calibrant, wavelength=wavelength)
+        calibrant = Calibrant(dSpacing=calibrant)
+    calibrant.set_wavelength(wavelength)
+    assert calibrant.get_dSpacing()
+    # FIXME: It seems pyFAI upstream master has started deprecating
+    # calibartion with their own gui...Need solution for pyFAI 0.16.0
     # configure calibration instance
     c = Calibration(calibrant=calibrant, detector=detector,
                     wavelength=wavelength)
-    # pyFAI calibration
-    calib_c, timestr = _calibration(img, c, calib_ref_fp, **kwargs)
+    c.gui = interactive
+    # annoying pyFAI logic, you need valid fn to start calibration
+    _is_tmp_dir = False
+    if calib_ref_fp is None:
+        _is_tmp_dir = True
+        td = TemporaryDirectory()
+        calib_ref_fp = os.path.join(td.name, 'from_calib_func')
+    basename, ext = os.path.splitext(calib_ref_fp)
+    c.basename = basename
+    c.pointfile = basename + ".npt"
+    c.ai = AzimuthalIntegrator(dist=dist, detector=detector,
+                               wavelength=calibrant.wavelength)
+    if calib_kwargs is None:
+        calib_kwargs = {}
+    c.peakPicker = PeakPicker(img, reconst=True,
+                              pointfile=c.pointfile,
+                              calibrant=calibrant,
+                              wavelength=calibrant.wavelength,
+                              **calib_kwargs)
+    if interactive:
+        c.peakPicker.gui(log=True, maximize=True, pick=True)
+        update_fig(c.peakPicker.fig)
+    c.gui_peakPicker()
+    c.ai.setPyFAI(**c.geoRef.getPyFAI())
+    c.ai.wavelength = c.geoRef.wavelength
+    if _is_tmp_dir:
+        td.cleanup()
+
     # img2 = img.copy()
     # img2 /= calib_c.ai.polarization(img2.shape, .99)
     # calib_c, timestr = _calibration(img2, c, calib_ref_fp, **kwargs)
 
-    return calib_c, calib_c.ai
+    return c, c.ai
